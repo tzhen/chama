@@ -589,10 +589,11 @@ class CoverageFormulation(object):
 
         # make a series of the coverage column (for faster access)
         coverage_series = coverage.set_index('Sensor')[coverage_col_name]
-
+        
         # create a dictionary of sets where the key is the entity, and the
         # value is the set of sensors that covers that entity
         entity_sensors = {e:set() for e in entity_list}
+
         for s in sensor_list:
             s_entities = coverage_series[s]
 
@@ -719,6 +720,503 @@ class CoverageFormulation(object):
                 'EntityAssessment': entity_assessment,
                 'SensorAssessment': sensor_assessment}
 
+
+class CombinedFormulation(object):
+    """
+    Sensor placement based on minimizing average impact across a set of scenarios.
+    """
+
+    def __init__(self):
+        self._model = None
+        self._impact = None
+        self._sensor = None
+        self._scenario = None
+        self._impact_col_name = 'Impact'
+        self._use_scenario_probability = False
+        self._use_sensor_cost = False
+        self._solved = False
+
+    def solve(self, impact=None, sensor=None, scenario=None,
+              sensor_budget=None, use_sensor_cost=False,
+              use_scenario_probability=False, impact_col_name='Impact',
+              mip_solver_name='glpk', pyomo_options=None, solver_options=None,
+              coverage=None, entity=None, use_entity_weight=False, redundancy=0, 
+              coverage_col_name='Coverage'):
+        """
+        Solves the sensor placement optimization by minimizing impact.
+
+        Parameters
+        ----------
+        impact : pandas DataFrame
+            Impact assessment. Impact is stored as a pandas DataFrame with columns 
+            **Scenario**, **Sensor**, and **Impact**. Each row contains a single 
+            detection time (or other measure of impact/damage) for a sensor 
+            that detects a scenario. The column name for Impact can also be 
+            specified by the user using the argument 'impact_col_name'.
+        sensor : pandas DataFrame
+            Sensor characteristics. Contains sensor cost for each sensor.
+            Sensor characteristics are stored as a pandas DataFrame with
+            columns **Sensor** and **Cost**. Cost is used in the sensor placement
+            optimization if the 'use_sensor_cost' flag is set to True.
+        scenario : pandas DataFrame
+            Scenario characteristics. Contains scenario probability and the
+            impact for undetected scenarios. Scenario characteristics are
+            stored as a pandas DataFrame with columns **Scenario**,
+            **Undetected Impact**, and **Probability**. Undetected Impact is
+            required for each scenario. Probability is used if the
+            'use_scenario_probability' flag is set to True.
+        sensor_budget : float
+            The total budget available for purchase/installation of sensors.
+            Solution will select a family of sensors whose combined cost is
+            below the sensor_budget. For a simple sensor budget of N sensors,
+            set this to N and the 'use_sensor_cost' to False.
+        use_sensor_cost : bool
+            Boolean indicating if sensor cost should be used in the
+            optimization. If False, sensors have equal cost of 1.
+        use_scenario_probability : bool
+            Boolean indicating if scenario probability should be used in the
+            optimization. If False, scenarios have equal probability.
+        impact_col_name : str
+            The name of the column containing the impact data to be used
+            in the objective function.
+        coverage : pandas DataFrame
+            Coverage data. Coverage is stored as a pandas DataFrame with columns
+            **Sensor** and **Coverage**.  Each row contains a list of entities 
+            that are covered by single sensor. The column name for Coverage can also be 
+            specified by the user using the argument 'coverage_col_name'.
+        entity : pandas DataFrame
+            Entity characteristics. Contains entity weights. 
+            Entity characteristics are stored as a pandas DataFrame with columns 
+            **Entity** and **Weight**. Weight is used if the
+            'use_entity_weight' flag is set to True.
+        use_entity_weight : bool
+            Boolean indicating if entity weights should be used in the
+            optimization. If False, entities have equal weight.
+        redundancy : int
+            Redundancy level. A value of 0 means only one sensor is required to 
+            covered an entity, whereas a value of 1 means two sensors must 
+            cover an entity before it considered covered.
+        coverage_col_name : str
+            The name of the column containing the coverage data to be used
+            in the objective function.
+        mip_solver_name : str
+            Optimization solver name passed to Pyomo. The solver must be
+            supported by Pyomo and support solution of mixed-integer
+            programming problems.
+        pyomo_options : dict
+            Keyword arguments to be passed to the Pyomo solver .solve method.
+            Defaults to an empty dictionary.
+        solver_options : dict
+            Solver specific options to pass through Pyomo to the underlying solver.
+            Defaults to an empty dictionary.
+
+        Returns
+        -------
+        A dictionary with the following keys:
+            * Sensors: A list of the selected sensors
+            * Objective: The mean impact based on the selected sensors
+            * FractionDetected: The fraction of scenarios that were detected
+            * TotalSensorCost: Total cost of the selected sensors
+            * Assessment: The impact value for each sensor-scenario pair.
+              The assessment is stored as a pandas DataFrame with columns
+              **Scenario**, **Sensor**, and **Impact** (same format as the input
+              Impact assessment). If the selected sensors did not detect a
+              particular scenario, the impact is set to the Undetected Impact.
+            * EntityAssessment: a dictionary whose keys are the entity names, 
+              and values are a list of sensors that detect that entity
+            
+        """
+
+        self.create_pyomo_model(impact=impact, sensor=sensor, scenario=scenario,
+                                sensor_budget=sensor_budget, use_sensor_cost=use_sensor_cost,
+                                use_scenario_probability=use_scenario_probability,
+                                impact_col_name=impact_col_name, coverage=coverage, entity=entity,
+                                use_entity_weight=use_entity_weight, redundancy=redundancy,
+                                coverage_col_name=coverage_col_name)
+
+        self.solve_pyomo_model(sensor_budget=sensor_budget, mip_solver_name=mip_solver_name,
+                               pyomo_options=pyomo_options, solver_options=solver_options)
+
+        results_dict = self.create_solution_summary()
+
+        # might want to throw this exception, might want to pass this through to the results object
+        if not self._model.solved:
+            raise RuntimeError("Optimization failed to solve. Please set pyomo_options={'tee': True}"
+                               " and check solver logs.")
+
+        return results_dict
+
+
+    def create_pyomo_model(self, coverage=None, sensor=None, entity=None, sensor_budget=None, use_sensor_cost=False,
+                           use_entity_weight=False, redundancy=0, coverage_col_name='Coverage', impact=None, 
+                           scenario=None, use_scenario_probability=False, impact_col_name='Impact'):
+        """
+        Returns the Pyomo model. 
+        
+        See :py:meth:`CoverageFormulation.solve` for more information on parameters.
+        
+        Returns
+        -------
+        Pyomo ConcreteModel ready to be solved
+        """
+
+        self._model = None
+        self._impact = None
+        self._sensor = None
+        self._scenario = None
+
+        # validate the pandas dataframe input
+        cu._df_columns_required('impact', impact,
+                                {'Scenario': np.object,
+                                 'Sensor': np.object,
+                                 impact_col_name: [np.float64, np.int64]})
+        cu._df_nans_not_allowed('impact', impact)
+        if sensor is not None:
+            cu._df_columns_required('sensor', sensor,
+                                   {'Sensor': np.object})
+            cu._df_nans_not_allowed('sensor', sensor)
+
+            sensor = sensor.set_index('Sensor')
+            assert(sensor.index.names[0] == 'Sensor')
+
+        cu._df_columns_required('scenario', scenario,
+                               {'Scenario': np.object,
+                               'Undetected Impact': [np.float64, np.int64]})
+        cu._df_nans_not_allowed('scenario', scenario)
+
+        # validate optional columns in pandas dataframe input
+        if use_scenario_probability:
+            cu._df_columns_required('scenario', scenario,
+                                    {'Probability': np.float64})
+
+        if use_sensor_cost:
+            if sensor is None:
+                raise ValueError(
+                    'ImpactFormulation: use_sensor_cost cannot be '
+                    'True if "sensor" DataFrame is not provided.')
+            cu._df_columns_required('sensor', sensor,
+                                    {'Cost': [np.float64, np.int64]})
+
+        # Notice, setting the index here
+        impact = impact.set_index(['Scenario', 'Sensor'])
+        assert(impact.index.names[0] == 'Scenario')
+        assert(impact.index.names[1] == 'Sensor')
+
+        # Python set will extract the unique Scenario and Sensor values
+        scenario_list = sorted(scenario['Scenario'].unique())
+
+        # Always get sensor list from impact DataFrame in case there are
+        # sensors in the sensor DataFrame that didn't detect anything and
+        # therefore do not appear in the impact DataFrame
+        sensor_list_impact = sorted(set(impact.index.get_level_values('Sensor')))
+
+        if use_sensor_cost:
+            sensor_cost = sensor['Cost']
+        else:
+            sensor_cost = pd.Series(data=[1.0]*len(sensor_list_impact), index=sensor_list_impact)
+
+        # Add in the data for the dummy sensor to account for a scenario that
+        # is undetected
+        sensor_list_impact.append(dummy_sensor_name)
+
+        df_dummy = pd.DataFrame(scenario_list, columns=['Scenario'])
+        df_dummy = df_dummy.set_index(['Scenario'])
+
+        scenario = scenario.set_index(['Scenario'])
+        df_dummy[impact_col_name] = scenario['Undetected Impact']
+        scenario.reset_index(level=[0], inplace=True)
+
+        df_dummy['Sensor'] = dummy_sensor_name
+        df_dummy = df_dummy.reset_index().set_index(['Scenario', 'Sensor'])
+        impact = impact.append(df_dummy)
+        sensor_cost[dummy_sensor_name] = 0.0
+
+        # Create a list of tuples for all the scenario/sensor pairs where
+        # detection has occurred
+        scenario_sensor_pairs = impact.index.tolist()
+
+        # Create the (jagged) index set of sensors that were able to detect a
+        # particular scenario
+        scenario_sensors = dict()
+        for (a, i) in scenario_sensor_pairs:
+            if a not in scenario_sensors:
+                scenario_sensors[a] = list()
+            scenario_sensors[a].append(i)
+
+
+        model = pe.ConcreteModel()
+
+        
+
+        entity_list = None
+        if entity is None:
+            if use_entity_weight:
+                raise ValueError('CoverageFormulation: use_entity_weight cannot be True if'
+                                 '"entity" DataFrame is not provided.')
+            # build the list of entities from the coverage DataFrame
+            covered_items = coverage['Coverage'].tolist()
+            entity_list = sorted(cu._unique_items_from_list_of_lists(covered_items))
+        else:
+            entity_list = sorted(entity['Entity'].unique())
+
+        if sensor is None and use_sensor_cost:
+            raise ValueError('CoverageFormulation: use_sensor_cost cannot be True if "sensor" DataFrame is not provided.')
+
+        # Always get sensor list from coverage DataFrame in case there are
+        # sensors in the sensor DataFrame that didn't detect anything and
+        # therefore do not appear in the coverage DataFrame
+        sensor_list_cov = sorted(coverage['Sensor'].unique())
+
+        # make a series of the coverage column (for faster access)
+        coverage_series = coverage.set_index('Sensor')[coverage_col_name]
+
+        # create a dictionary of sets where the key is the entity, and the
+        # value is the set of sensors that covers that entity
+        entity_sensors = {e:set() for e in entity_list}
+        for s in sensor_list_cov:
+            s_entities = coverage_series[s]
+
+            for e in s_entities:
+                entity_sensors[e].add(s)
+
+        for e in entity_sensors.keys():
+            entity_sensors[e] = list(sorted(entity_sensors[e]))
+
+        #------Sets------
+        model.scenario_sensors = scenario_sensors
+        model.entity_list = pe.Set(initialize=entity_list, ordered=True)
+        model.sensor_list_cov = pe.Set(initialize=sensor_list_cov, ordered=True)
+        model.scenario_set = pe.Set(initialize=scenario_list, ordered=True)
+        model.sensor_list_impact = pe.Set(initialize=sensor_list_impact, ordered=True)
+        model.scenario_sensor_pairs_set = pe.Set(initialize=scenario_sensor_pairs, ordered=True)
+
+        #------Variables------
+        # x_{a,i} variable indicates which sensor is the first to detect
+        # scenario a
+        model.x = pe.Var(model.scenario_sensor_pairs_set, bounds=(0, 1))
+
+        # y_i variable indicates if a sensor is installed or not
+        model.g = pe.Var(model.sensor_list_impact, within=pe.Binary)
+
+        if redundancy > 0:
+            model.y = pe.Var(model.entity_list, within=pe.Binary)
+        else:
+            model.y = pe.Var(model.entity_list, bounds=(0,1))
+        model.f = pe.Var(model.sensor_list_cov, within=pe.Binary)
+
+        #------Params------
+        if sensor_budget is None:
+            if use_sensor_cost:
+                raise ValueError('CoverageFormulation: sensor_budget must be specified if use_sensor_cost is set to True.')
+            sensor_budget = len(sensor_list) # no sensor budget provided - allow all sensors
+        model.sensor_budget = pe.Param(initialize=sensor_budget, mutable=True)
+
+        #------Objective------
+        # objective function minimize the sum impact across all scenarios
+        if use_scenario_probability and use_entity_weight:
+            entity_weights = entity.set_index('Entity')['Weight']
+            scenario.set_index(['Scenario'], inplace=True)
+            model.obj = pe.Objective(expr= \
+                sum(float(scenario.at[a, 'Probability']) *
+                float(impact[impact_col_name].loc[a, i]) * model.x[a, i]
+                for (a, i) in scenario_sensor_pairs) - sum(float(entity_weights[e])*model.y[e] for e in entity_list))
+        elif use_scenario_probability:
+            scenario.set_index(['Scenario'], inplace=True)
+            model.obj = pe.Objective(expr= \
+                sum(float(scenario.at[a, 'Probability']) *
+                float(impact[impact_col_name].loc[a, i]) * model.x[a, i]
+                for (a, i) in scenario_sensor_pairs) - sum(model.y[e] for e in entity_list))
+        elif use_entity_weight:
+            model.obj = pe.Objective(expr= \
+                1.0 / float(len(scenario_list)) *
+                sum(float(impact[impact_col_name].loc[a, i]) * model.x[a, i]
+                for (a, i) in scenario_sensor_pairs) - sum(float(entity_weights[e])*model.y[e] for e in entity_list))
+        else:
+            model.obj = pe.Objective(expr= \
+                1.0 / float(len(scenario_list)) *
+                sum(float(impact[impact_col_name].loc[a, i]) * model.x[a, i]
+                for (a, i) in scenario_sensor_pairs) - sum(model.y[e] for e in entity_list))
+
+        #------Constraints------
+        # constrain the problem to have only one x value for each scenario
+        def limit_x_rule(m, a):
+            return sum(m.x[a, i] for i in scenario_sensors[a]) == 1
+        model.limit_x = pe.Constraint(model.scenario_set, rule=limit_x_rule)
+
+        # can only detect scenario a with location i if location i is selected
+        def detect_only_if_sensor_rule(m, a, i):
+            return m.x[a, i] <= model.g[i]
+        model.detect_only_if_sensor = \
+            pe.Constraint(model.scenario_sensor_pairs_set,
+                          rule=detect_only_if_sensor_rule)
+
+        # limit the number of sensors
+        # model.total_sensor_cost = pe.Expression(expr=sum(float(sensor_cost[i]) * model.g[i] for i in sensor_list_impact))
+        # model.sensor_budget_con = pe.Constraint(expr= model.total_sensor_cost <= model.sensor_budget)
+
+        def entity_covered_rule(m, e):
+            if redundancy > 0:
+                return (redundancy + 1.0)*m.y[e] <= sum(m.f[b] for b in entity_sensors[e])
+            return m.y[e] <= sum(m.f[b] for b in entity_sensors[e])
+        model.entity_covered = pe.Constraint(model.entity_list, rule=entity_covered_rule)
+
+        if use_sensor_cost:
+            sensor_cost = sensor.set_index('Sensor')['Cost']
+            model.total_sensor_cost = pe.Expression(expr=sum(sensor_cost[s]*model.f[s] for s in sensor_list_cov) + \
+                sum(float(sensor_cost[i]) * model.g[i] for i in sensor_list_impact))
+        else:
+            model.total_sensor_cost = pe.Expression(expr=sum(model.f[s] for s in sensor_list_cov) + \
+                sum(model.g[i] for i in sensor_list_impact))
+        model.sensor_upper_limit = pe.Constraint(expr= model.total_sensor_cost <= model.sensor_budget)
+
+
+        impact.reset_index(inplace=True)
+        self._impact = impact
+        self._sensor = sensor
+        scenario.reset_index(inplace=True)
+        self._scenario = scenario
+        self._impact_col_name = impact_col_name
+        self._use_sensor_cost = use_sensor_cost
+        self._use_scenario_probability = use_scenario_probability
+
+        # Any changes to the model require re-solving
+        self._solved = False
+
+
+        model.entity_sensors = entity_sensors
+        model.solved = False
+        self._model = model
+        return model
+
+    def solve_pyomo_model(self, sensor_budget=None, mip_solver_name='glpk',
+                          pyomo_options=None, solver_options=None):
+        """
+        Solves the Pyomo model created to perform the sensor placement.
+
+        See :py:meth:`CoverageFormulation.solve` for more information on parameters.
+        """
+
+        if self._model is None:
+            raise RuntimeError('Cannot call solve_pyomo_model before the model'
+                               ' is created with create_pyomo_model'
+                               )
+
+        self._model.solved = False
+
+        # change the sensor budget if necessary
+        if sensor_budget is not None:
+            self._model.sensor_budget = sensor_budget
+
+        (solved, results) = _solve_pyomo_model(self._model, mip_solver_name=mip_solver_name,
+                                               pyomo_options=pyomo_options, solver_options=solver_options)
+
+        self._model.solved = solved
+        
+        results.write()
+        fire_detect = self._model.f.get_values()
+        gas_detect = self._model.g.get_values()
+        print('\nTotal Number of Built Sensors: {} \n'.format(sum(i>0 for i in fire_detect.values()) \
+            + sum(i>0 for i in gas_detect.values())))
+
+    def create_solution_summary(self):
+        """
+        Creates a dictionary representing common summary information about the
+        solution from a Pyomo model object that has already been solved.
+
+        See :py:meth:`CoverageFormulation.solve` for more information on the solution summary.
+ 
+        Returns
+        -------
+        Dictionary containing a summary of results.
+        """
+        if self._model is None:
+            raise RuntimeError('Cannot call create_solution_summary before '
+                               'the model is created and solved.'
+                               )
+
+        model = self._model
+        if not model.solved:
+            return {'Solved': model.solved,
+                    'Objective': None,
+                    'Sensors': None,
+                    'FractionDetected': None,
+                    'EntityAssessment': None,
+                    'ImpactAssessment': None,
+                    'SensorAssessment': None}
+
+        model = self._model
+        impact_df = self._impact
+        scenario_df = self._scenario
+        selected_sensors_gas = []
+        for key in model.g:
+            if pe.value(model.g[key]) > 0.5:
+                if key != dummy_sensor_name:
+                    selected_sensors_gas.append(key)
+
+        obj_value = pe.value(model.obj)
+        selected_impact = {'Scenario': [], 'Sensor': [], 'Impact': []}
+        for key in model.x:
+            scenario = key[0]
+            sensor = key[1]
+            if pe.value(model.x[(scenario, sensor)]) > 0.5:
+                if sensor == dummy_sensor_name:
+                    sensor = None
+                    impact_val = \
+                        scenario_df[scenario_df['Scenario'] ==
+                                    scenario]['Undetected Impact'].values[0]
+                else:
+                    
+                    impact_val = \
+                        impact_df[(impact_df['Scenario'] == scenario) &
+                                  (impact_df['Sensor'] == sensor)][
+                            self._impact_col_name].values[0]
+                selected_impact['Scenario'].append(scenario)
+                selected_impact['Sensor'].append(sensor)
+                selected_impact['Impact'].append(impact_val)
+
+        selected_impact = pd.DataFrame(selected_impact)
+        selected_impact = selected_impact[['Scenario', 'Sensor', 'Impact']]
+
+        frac_detected = 0
+        for a in model.scenario_set:
+            detected = sum(pe.value(model.x[a,i]) for i in model.scenario_sensors[a] if i != dummy_sensor_name)
+            eps = 1e-6
+            assert(detected >= 0-eps and detected <= 1+eps)
+            if detected > 0.5:
+                frac_detected += 1
+        frac_detected_gas = float(frac_detected)/float(len(model.scenario_set))
+
+        selected_sensors_fire = []
+        for key in model.f:
+            if pe.value(model.f[key]) > 0.5:
+                selected_sensors_fire.append(key)
+
+        obj_value = pe.value(model.obj)
+
+        frac_detected_fire = sum(pe.value(model.y[e]) for e in model.y)/(len(model.y))
+
+        entity_assessment = {e:[] for e in model.entity_list}
+        for e in model.entity_list:
+            for s in model.entity_sensors[e]:
+                if pe.value(model.f[s]) > 0.5:
+                    entity_assessment[e].append(s)
+
+        sensor_assessment = dict()
+        for s in model.sensor_list_cov:
+            if pe.value(model.f[s]) > 0.5:
+                sensor_assessment[s] = [e for e in model.entity_list if s in model.entity_sensors[e]]
+
+        return {'Solved': self._solved,
+                 'Objective': obj_value,
+                 'SensorsGas': selected_sensors_gas,
+                 'SensorsFire': selected_sensors_fire,
+                 'FractionDetectedGas': frac_detected_gas,
+                 'FractionDetectedFire': frac_detected_fire,
+                 'TotalSensorCost': pe.value(model.total_sensor_cost),
+                 'ImpactAssessment': selected_impact,
+                 'EntityAssessment': entity_assessment,
+                 'SensorAssessment': sensor_assessment}
+
 def _solve_pyomo_model(model, mip_solver_name='glpk', pyomo_options=None, solver_options=None):
     """
     Internal method to solve the Pyomo model and check the optimization status
@@ -738,7 +1236,12 @@ def _solve_pyomo_model(model, mip_solver_name='glpk', pyomo_options=None, solver
     opt = pe.SolverFactory(mip_solver_name)
 
     results = opt.solve(model, options=solver_options, **pyomo_options)
-
+    #-----Todd----
+    # results.write()
+    # fire_detect = model.f.get_values()
+    # gas_detect = model.g.get_values()
+    # print('\nTotal Number of Built Sensors: {} \n'.format(sum(i>0 for i in fire_detect.values()) + sum(i>0 for i in gas_detect.values())))
+    #-----Todd----
     # Check solver status
     solved = None
     if (results.solver.status == SolverStatus.ok) and \
