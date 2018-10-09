@@ -723,7 +723,7 @@ class CoverageFormulation(object):
                 'SensorAssessment': sensor_assessment}
 
 
-class CoverageProbFormulation(object):
+class CoverageMaxProbFormulation(object):
     """
     Sensor placement based on maximizing coverage of a set of entities.
     An 'entity' can represent geographic areas, scenarios, or scenario-time pairs.
@@ -870,6 +870,11 @@ class CoverageProbFormulation(object):
         model.entity_list = pe.Set(initialize=entity_list, ordered=True)
         model.sensor_list = pe.Set(initialize=sensor_list, ordered=True)
 
+        prob = dict.fromkeys(model.entity_list,0)
+        np.random.seed(1)
+        for key, value in prob.items():
+            prob[key] = np.random.uniform(0.85,0.99)
+
         if redundancy > 0:
             model.x = pe.Var(model.entity_list, within=pe.Binary)
         else:
@@ -888,8 +893,7 @@ class CoverageProbFormulation(object):
         def entity_covered_rule(m, e):
             # if redundancy > 0:
             #     return (redundancy + 1.0)*m.x[e] <= sum(m.y[b] for b in entity_sensors[e])
-            prob = 0.20
-            return m.x[e] <= 1 - prod(1 - prob * m.y[b] for b in entity_sensors[e])
+            return m.x[e] <= 1 - prod(1 - prob[e] * m.y[b] for b in entity_sensors[e])
         model.entity_covered = pe.Constraint(model.entity_list, rule=entity_covered_rule)
 
         if sensor_budget is None:
@@ -989,7 +993,7 @@ class CoverageProbFormulation(object):
                 'SensorAssessment': sensor_assessment}
 
 
-class CoverageProbFormulationRelaxed(object):
+class CoverageMaxProbFormulationRelaxed(object):
     """
     Sensor placement based on maximizing coverage of a set of entities.
     An 'entity' can represent geographic areas, scenarios, or scenario-time pairs.
@@ -999,7 +1003,7 @@ class CoverageProbFormulationRelaxed(object):
 
     def solve(self, coverage, sensor=None, entity=None, sensor_budget=None,
               use_sensor_cost=None, use_entity_weight=False, redundancy=0, coverage_col_name='Coverage',
-              mip_solver_name='glpk', pyomo_options=None, solver_options=None):
+              mip_solver_name='glpk', pyomo_options=None, solver_options=None, relax_set=None):
         """
         Solves the sensor placement optimization by maximizing coverage.
 
@@ -1065,7 +1069,7 @@ class CoverageProbFormulationRelaxed(object):
         self.create_pyomo_model(coverage=coverage, sensor=sensor, entity=entity,
                                 sensor_budget=sensor_budget, use_sensor_cost=use_sensor_cost,
                                 use_entity_weight=use_entity_weight, redundancy=redundancy,
-                                coverage_col_name=coverage_col_name)
+                                coverage_col_name=coverage_col_name, relax_set=relax_set)
 
         self.solve_pyomo_model(sensor_budget=sensor_budget, mip_solver_name=mip_solver_name,
                                pyomo_options=pyomo_options, solver_options=solver_options)
@@ -1081,7 +1085,7 @@ class CoverageProbFormulationRelaxed(object):
 
 
     def create_pyomo_model(self, coverage, sensor=None, entity=None, sensor_budget=None, use_sensor_cost=False,
-                           use_entity_weight=False, redundancy=0, coverage_col_name='Coverage'):
+                           use_entity_weight=False, redundancy=0, coverage_col_name='Coverage', relax_set=None):
         """
         Returns the Pyomo model. 
         
@@ -1139,7 +1143,7 @@ class CoverageProbFormulationRelaxed(object):
         prob = dict.fromkeys(model.entity_list,0)
         np.random.seed(1)
         for key, value in prob.items():
-            prob[key] = np.random.rand()
+            prob[key] = np.random.uniform(0.85,0.99)
 
         if redundancy > 0:
             model.x = pe.Var(model.entity_list, within=pe.Binary)
@@ -1170,10 +1174,19 @@ class CoverageProbFormulationRelaxed(object):
             return m.g[e] >= pe.exp(z) * (m.gbar[e] - z + 1)
 
         model.entity_convexrelaxation = pe.ConstraintList()
-        for e in model.entity_list:
-            n = len(entity_sensors[e])
-            for z in np.linspace(-4.6*n, -0.01, n*3):
-                model.entity_convexrelaxation.add(entity_convexrelaxation_rule(model, e, z))
+
+        if type(relax_set) is dict:
+            for e in model.entity_list:
+                for z in relax_set[e]:
+                    model.entity_convexrelaxation.add(entity_convexrelaxation_rule(model, e, z))
+            model.relax_set = relax_set
+        else:
+            gen_relax_set = {}
+            for e in model.entity_list:
+                gen_relax_set[e] = relax_set
+                for z in gen_relax_set[e]:
+                    model.entity_convexrelaxation.add(entity_convexrelaxation_rule(model, e, z))
+            model.relax_set = gen_relax_set
 
         if sensor_budget is None:
             if use_sensor_cost:
@@ -1251,6 +1264,9 @@ class CoverageProbFormulationRelaxed(object):
         obj_value = pe.value(model.obj)
 
         frac_detected = sum(pe.value(model.x[e]) for e in model.x)/(len(model.x))
+        total_areas_to_detect = len(model.x)
+        total_candidate_sensors = len(model.y)
+
 
         entity_assessment = {e:[] for e in model.entity_list}
         for e in model.entity_list:
@@ -1263,13 +1279,25 @@ class CoverageProbFormulationRelaxed(object):
             if pe.value(model.y[s]) > 0.5:
                 sensor_assessment[s] = [e for e in model.entity_list if s in model.entity_sensors[e]]
 
+        g_out = {}
+        gbar_out = {}
+        for key in model.g:
+            g_out[key] = pe.value(model.g[key])
+            gbar_out[key] = pe.value(model.gbar[key])
+
         return {'Solved': model.solved,
                 'Objective': obj_value,
                 'Sensors': selected_sensors,
                 'FractionDetected': frac_detected,
+                'TotalEntities': total_areas_to_detect,
+                'TotalCandidateSensors': total_candidate_sensors,
                 'TotalSensorCost': pe.value(model.total_sensor_cost),
                 'EntityAssessment': entity_assessment,
-                'SensorAssessment': sensor_assessment}
+                'SensorAssessment': sensor_assessment,
+                'Model.y': model.y,
+                'model.g': g_out,
+                'model.gbar': gbar_out,
+                'model.relax_set': model.relax_set}
 
 
 class CombinedFormulation(object):
