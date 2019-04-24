@@ -604,7 +604,17 @@ class CoverageFormulation(object):
 
         for e in entity_sensors.keys():
             entity_sensors[e] = list(sorted(entity_sensors[e]))
-
+        
+        #---Output Dataframe for Histogram of Sensor-Entities---
+        # d = pd.DataFrame(columns=['Entity','Sensors'])
+        # d['Entity'] = entity_sensors.keys()
+        # d['Sensors'] = entity_sensors.values()
+        # d['Len'] = d['Sensors'].str.len()
+        # d = d.sort_values(by=['Len'], ascending=False)
+        # print(d)
+        # quit()
+        #---Output Dataframe for Histogram of Sensor-Entities---
+        
         model.entity_list = pe.Set(initialize=entity_list, ordered=True)
         model.sensor_list = pe.Set(initialize=sensor_list, ordered=True)
 
@@ -973,6 +983,8 @@ class CoverageMaxProbFormulation(object):
         obj_value = pe.value(model.obj)
 
         frac_detected = sum(pe.value(model.x[e]) for e in model.x)/(len(model.x))
+        total_areas_to_detect = len(model.x)
+        total_candidate_sensors = len(model.y)
 
         entity_assessment = {e:[] for e in model.entity_list}
         for e in model.entity_list:
@@ -992,6 +1004,8 @@ class CoverageMaxProbFormulation(object):
                 'TotalSensorCost': pe.value(model.total_sensor_cost),
                 'EntityAssessment': entity_assessment,
                 'SensorAssessment': sensor_assessment,
+                'TotalEntities': total_areas_to_detect,
+                'TotalCandidateSensors': total_candidate_sensors,
                 'model.y': model.y}
 
 
