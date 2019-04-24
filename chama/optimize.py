@@ -744,7 +744,7 @@ class CoverageMaxProbFormulation(object):
 
     def solve(self, coverage, sensor=None, entity=None, sensor_budget=None,
               use_sensor_cost=None, use_entity_weight=False, redundancy=0, coverage_col_name='Coverage',
-              mip_solver_name='glpk', pyomo_options=None, solver_options=None, probability=None, io_options=None):
+              mip_solver_name='glpk', pyomo_options=None, solver_options=None, probability=None):
         """
         Solves the sensor placement optimization by maximizing coverage.
 
@@ -812,7 +812,7 @@ class CoverageMaxProbFormulation(object):
                                 use_entity_weight=use_entity_weight, redundancy=redundancy,
                                 coverage_col_name=coverage_col_name, probability=probability)
 
-        self.solve_pyomo_model(sensor_budget=sensor_budget, mip_solver_name=mip_solver_name, io_options=io_options,
+        self.solve_pyomo_model(sensor_budget=sensor_budget, mip_solver_name=mip_solver_name,
                                pyomo_options=pyomo_options, solver_options=solver_options)
 
         # might want to throw this exception, might want to pass this through to the results object
@@ -926,7 +926,7 @@ class CoverageMaxProbFormulation(object):
         return model
 
     def solve_pyomo_model(self, sensor_budget=None, mip_solver_name='glpk',
-                          pyomo_options=None, solver_options=None, io_options=None):
+                          pyomo_options=None, solver_options=None):
         """
         Solves the Pyomo model created to perform the sensor placement.
 
@@ -945,8 +945,7 @@ class CoverageMaxProbFormulation(object):
             self._model.sensor_budget = sensor_budget
 
         (solved, results) = _solve_pyomo_model(self._model, mip_solver_name=mip_solver_name,
-                                               pyomo_options=pyomo_options, solver_options=solver_options, 
-                                               io_options=io_options)
+                                               pyomo_options=pyomo_options, solver_options=solver_options)
 
         self._model.solved = solved
 
@@ -1818,7 +1817,7 @@ class CombinedFormulation(object):
                  'SensorAssessment': sensor_assessment}
 
 
-def _solve_pyomo_model(model, mip_solver_name='glpk', io_options=None, pyomo_options=None, solver_options=None):
+def _solve_pyomo_model(model, mip_solver_name='glpk', pyomo_options=None, solver_options=None):
     """
     Internal method to solve the Pyomo model and check the optimization status
     """
@@ -1836,13 +1835,8 @@ def _solve_pyomo_model(model, mip_solver_name='glpk', io_options=None, pyomo_opt
     # create the solver
     opt = pe.SolverFactory(mip_solver_name)
 
-    results = opt.solve(model, options=solver_options, io_options=io_options, **pyomo_options)
-    #-----Todd----
-    # results.write()
-    # fire_detect = model.f.get_values()
-    # gas_detect = model.g.get_values()
-    # print('\nTotal Number of Built Sensors: {} \n'.format(sum(i>0 for i in fire_detect.values()) + sum(i>0 for i in gas_detect.values())))
-    #-----Todd----
+    results = opt.solve(model, options=solver_options, **pyomo_options)
+
     # Check solver status
     solved = None
     if (results.solver.status == SolverStatus.ok) and \
