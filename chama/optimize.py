@@ -1817,7 +1817,7 @@ class CombinedFormulation(object):
                  'SensorAssessment': sensor_assessment}
 
 
-def _solve_pyomo_model(model, mip_solver_name='glpk', pyomo_options=None, solver_options=None):
+def _solve_pyomo_model(model, mip_solver_name='glpk', io_options=None, pyomo_options=None, solver_options=None):
     """
     Internal method to solve the Pyomo model and check the optimization status
     """
@@ -1835,7 +1835,7 @@ def _solve_pyomo_model(model, mip_solver_name='glpk', pyomo_options=None, solver
     # create the solver
     opt = pe.SolverFactory(mip_solver_name)
 
-    results = opt.solve(model, options=solver_options, **pyomo_options)
+    results = opt.solve(model, options=solver_options, io_options=io_options, **pyomo_options)
     #-----Todd----
     # results.write()
     # fire_detect = model.f.get_values()
