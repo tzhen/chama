@@ -744,7 +744,7 @@ class CoverageMaxProbFormulation(object):
 
     def solve(self, coverage, sensor=None, entity=None, sensor_budget=None,
               use_sensor_cost=None, use_entity_weight=False, redundancy=0, coverage_col_name='Coverage',
-              mip_solver_name='glpk', pyomo_options=None, solver_options=None, probability=None):
+              mip_solver_name='glpk', pyomo_options=None, solver_options=None, probability=None, io_options=None):
         """
         Solves the sensor placement optimization by maximizing coverage.
 
@@ -812,7 +812,7 @@ class CoverageMaxProbFormulation(object):
                                 use_entity_weight=use_entity_weight, redundancy=redundancy,
                                 coverage_col_name=coverage_col_name, probability=probability)
 
-        self.solve_pyomo_model(sensor_budget=sensor_budget, mip_solver_name=mip_solver_name,
+        self.solve_pyomo_model(sensor_budget=sensor_budget, mip_solver_name=mip_solver_name, io_options=io_options,
                                pyomo_options=pyomo_options, solver_options=solver_options)
 
         # might want to throw this exception, might want to pass this through to the results object
