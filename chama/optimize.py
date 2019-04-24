@@ -1835,7 +1835,7 @@ def _solve_pyomo_model(model, mip_solver_name='glpk', pyomo_options=None, solver
     # create the solver
     opt = pe.SolverFactory(mip_solver_name)
 
-    results = opt.solve(model, io_options={'mtype':'minlp'}, **pyomo_options)
+    results = opt.solve(model, **pyomo_options, io_options={'mtype':'minlp'})
 
     # Check solver status
     solved = None
