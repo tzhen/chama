@@ -926,7 +926,7 @@ class CoverageMaxProbFormulation(object):
         return model
 
     def solve_pyomo_model(self, sensor_budget=None, mip_solver_name='glpk',
-                          pyomo_options=None, solver_options=None):
+                          pyomo_options=None, solver_options=None, io_options=None):
         """
         Solves the Pyomo model created to perform the sensor placement.
 
@@ -945,7 +945,8 @@ class CoverageMaxProbFormulation(object):
             self._model.sensor_budget = sensor_budget
 
         (solved, results) = _solve_pyomo_model(self._model, mip_solver_name=mip_solver_name,
-                                               pyomo_options=pyomo_options, solver_options=solver_options)
+                                               pyomo_options=pyomo_options, solver_options=solver_options, 
+                                               io_options=io_options)
 
         self._model.solved = solved
 
