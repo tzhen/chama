@@ -1157,7 +1157,7 @@ class CoverageMaxProbFormulationRelaxed(object):
         model.sensor_list = pe.Set(initialize=sensor_list, ordered=True)
         
         prob = dict.fromkeys(model.entity_list,0)
-        np.random.seed(1)
+        # np.random.seed(1)
         for key, value in prob.items():
             prob[key] = probability #np.random.uniform(0.70,0.99)
 
@@ -1191,18 +1191,18 @@ class CoverageMaxProbFormulationRelaxed(object):
 
         model.entity_convexrelaxation = pe.ConstraintList()
 
-        if type(relax_set) is dict:
-            for e in model.entity_list:
-                for z in relax_set[e]:
-                    model.entity_convexrelaxation.add(entity_convexrelaxation_rule(model, e, z))
-            model.relax_set = relax_set
-        else:
-            gen_relax_set = {}
-            for e in model.entity_list:
-                gen_relax_set[e] = relax_set
-                for z in gen_relax_set[e]:
-                    model.entity_convexrelaxation.add(entity_convexrelaxation_rule(model, e, z))
-            model.relax_set = gen_relax_set
+        # if type(relax_set) is dict:
+        #     for e in model.entity_list:
+        #         for z in relax_set[e]:
+        #             model.entity_convexrelaxation.add(entity_convexrelaxation_rule(model, e, z))
+        #     model.relax_set = relax_set
+        # else:
+        #     gen_relax_set = {}
+        #     for e in model.entity_list:
+        #         gen_relax_set[e] = relax_set
+        #         for z in gen_relax_set[e]:
+        #             model.entity_convexrelaxation.add(entity_convexrelaxation_rule(model, e, z))
+        #     model.relax_set = gen_relax_set
 
         if sensor_budget is None:
             if use_sensor_cost:
