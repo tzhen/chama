@@ -1835,10 +1835,10 @@ def _solve_pyomo_model(model, mip_solver_name='glpk', pyomo_options=None, solver
     # create the solver
     opt = pe.SolverFactory(mip_solver_name)
 
-    if mip_solver_name == 'gams':
-        results = opt.solve(model, **pyomo_options)
-    else:
-        results = opt.solve(model, options=solver_options, **pyomo_options)
+    # if mip_solver_name == 'gams':
+    #     results = opt.solve(model, **pyomo_options)
+    # else:
+    results = opt.solve(model, options=solver_options, **pyomo_options)
 
     # Check solver status
     solved = None
