@@ -1160,14 +1160,14 @@ class CoverageMaxProbFormulationRelaxed(object):
         model.entity_list = pe.Set(initialize=entity_list, ordered=True)
         model.sensor_list = pe.Set(initialize=sensor_list, ordered=True)
         
-        prob = dict.fromkeys(model.entity_list,0)
+        model.prob = dict.fromkeys(model.entity_list,0)
         np.random.seed(1)
-        for key, value in prob.items():
+        for key, value in model.prob.items():
             if isinstance(probability,float):
-                prob[key] = probability
+                model.prob[key] = probability
             elif isinstance(probability,str):
                 rang = probability.split(',')
-                prob[key] = np.random.uniform(float(rang[0]),float(rang[1]))
+                model.prob[key] = np.random.uniform(float(rang[0]),float(rang[1]))
 
         if redundancy > 0:
             model.x = pe.Var(model.entity_list, within=pe.Binary)
@@ -1191,7 +1191,7 @@ class CoverageMaxProbFormulationRelaxed(object):
         model.entity_converse = pe.Constraint(model.entity_list, rule=entity_converse_rule)
 
         def entity_probability_rule(m, e):
-            return m.gbar[e] == sum(m.y[l] * pe.log(1-prob[e]) for l in entity_sensors[e])
+            return m.gbar[e] == sum(m.y[l] * pe.log(1-m.prob[e]) for l in entity_sensors[e])
         model.entity_probability = pe.Constraint(model.entity_list, rule=entity_probability_rule)
 
         def entity_convexrelaxation_rule(m, e, z):
@@ -1322,6 +1322,7 @@ class CoverageMaxProbFormulationRelaxed(object):
                 'TotalSensorCost': pe.value(model.total_sensor_cost),
                 'EntityAssessment': entity_assessment,
                 'SensorAssessment': sensor_assessment,
+                'Prob_list': model.prob,
                 'model.y': model.y,
                 'model.g': g_out,
                 'model.gbar': gbar_out,
