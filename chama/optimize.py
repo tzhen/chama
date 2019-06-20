@@ -884,7 +884,11 @@ class CoverageMaxProbFormulation(object):
         prob = dict.fromkeys(model.entity_list,0)
         np.random.seed(1)
         for key, value in prob.items():
-            prob[key] = np.random.uniform(0.88,0.92)
+            if isinstance(prob,float):
+                prob[key] = prob
+            elif isinstance(prob,str):
+                rang = prob.split(',')
+                prob[key] = np.random.uniform(float(rang[0]),float(rang[1]))
 
         if redundancy > 0:
             model.x = pe.Var(model.entity_list, within=pe.Binary)
@@ -1157,9 +1161,13 @@ class CoverageMaxProbFormulationRelaxed(object):
         model.sensor_list = pe.Set(initialize=sensor_list, ordered=True)
         
         prob = dict.fromkeys(model.entity_list,0)
-        # np.random.seed(1)
+        np.random.seed(1)
         for key, value in prob.items():
-            prob[key] = probability #np.random.uniform(0.70,0.99)
+            if isinstance(prob,float):
+                prob[key] = prob
+            elif isinstance(prob,str):
+                rang = prob.split(',')
+                prob[key] = np.random.uniform(float(rang[0]),float(rang[1]))
 
         if redundancy > 0:
             model.x = pe.Var(model.entity_list, within=pe.Binary)
