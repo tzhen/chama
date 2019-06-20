@@ -884,7 +884,7 @@ class CoverageMaxProbFormulation(object):
         prob = dict.fromkeys(model.entity_list,0)
         np.random.seed(1)
         for key, value in prob.items():
-            prob[key] = np.random.uniform(0.50,0.99)
+            prob[key] = np.random.uniform(0.88,0.92)
 
         if redundancy > 0:
             model.x = pe.Var(model.entity_list, within=pe.Binary)
