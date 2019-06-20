@@ -884,10 +884,10 @@ class CoverageMaxProbFormulation(object):
         prob = dict.fromkeys(model.entity_list,0)
         np.random.seed(1)
         for key, value in prob.items():
-            if isinstance(prob,float):
-                prob[key] = prob
-            elif isinstance(prob,str):
-                rang = prob.split(',')
+            if isinstance(probability,float):
+                prob[key] = probability
+            elif isinstance(probability,str):
+                rang = probability.split(',')
                 prob[key] = np.random.uniform(float(rang[0]),float(rang[1]))
 
         if redundancy > 0:
@@ -1163,10 +1163,10 @@ class CoverageMaxProbFormulationRelaxed(object):
         prob = dict.fromkeys(model.entity_list,0)
         np.random.seed(1)
         for key, value in prob.items():
-            if isinstance(prob,float):
-                prob[key] = prob
-            elif isinstance(prob,str):
-                rang = prob.split(',')
+            if isinstance(probability,float):
+                prob[key] = probability
+            elif isinstance(probability,str):
+                rang = probability.split(',')
                 prob[key] = np.random.uniform(float(rang[0]),float(rang[1]))
 
         if redundancy > 0:
