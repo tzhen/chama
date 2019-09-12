@@ -1023,7 +1023,8 @@ class CoverageMaxProbFormulationRelaxed(object):
 
     def solve(self, coverage, sensor=None, entity=None, sensor_budget=None,
               use_sensor_cost=None, use_entity_weight=False, redundancy=0, coverage_col_name='Coverage',
-              mip_solver_name='glpk', pyomo_options=None, solver_options=None, relax_set=None, probability=None):
+              mip_solver_name='glpk', pyomo_options=None, solver_options=None, relax_set=None, probability=None,
+              probseed=1):
         """
         Solves the sensor placement optimization by maximizing coverage.
 
@@ -1089,7 +1090,8 @@ class CoverageMaxProbFormulationRelaxed(object):
         self.create_pyomo_model(coverage=coverage, sensor=sensor, entity=entity,
                                 sensor_budget=sensor_budget, use_sensor_cost=use_sensor_cost,
                                 use_entity_weight=use_entity_weight, redundancy=redundancy,
-                                coverage_col_name=coverage_col_name, relax_set=relax_set, probability=probability)
+                                coverage_col_name=coverage_col_name, relax_set=relax_set, probability=probability,
+                                probseed=probseed)
 
         self.solve_pyomo_model(sensor_budget=sensor_budget, mip_solver_name=mip_solver_name,
                                pyomo_options=pyomo_options, solver_options=solver_options)
@@ -1105,7 +1107,8 @@ class CoverageMaxProbFormulationRelaxed(object):
 
 
     def create_pyomo_model(self, coverage, sensor=None, entity=None, sensor_budget=None, use_sensor_cost=False,
-                           use_entity_weight=False, redundancy=0, coverage_col_name='Coverage', relax_set=None, probability=None):
+                           use_entity_weight=False, redundancy=0, coverage_col_name='Coverage', relax_set=None, probability=None,
+                           probseed=1):
         """
         Returns the Pyomo model. 
         
@@ -1161,7 +1164,7 @@ class CoverageMaxProbFormulationRelaxed(object):
         model.sensor_list = pe.Set(initialize=sensor_list, ordered=True)
         
         model.prob = dict.fromkeys(model.entity_list,0)
-        np.random.seed(1)
+        np.random.seed(probseed)
         for key, value in model.prob.items():
             if isinstance(probability,float):
                 model.prob[key] = probability
@@ -1253,6 +1256,7 @@ class CoverageMaxProbFormulationRelaxed(object):
                                                pyomo_options=pyomo_options, solver_options=solver_options)
 
         self._model.solved = solved
+        self._model.results = results
 
     def create_solution_summary(self):
         """
@@ -1313,6 +1317,9 @@ class CoverageMaxProbFormulationRelaxed(object):
         # for key in model.y:
         #     y_out[key] = pe.value(model.y[key])
 
+        walltime = float(model.results.Solver[0]['Time'])
+        solvertime = float(model.results.Solver[0]['Wall time'])
+
         return {'Solved': model.solved,
                 'Objective': obj_value,
                 'Sensors': selected_sensors,
@@ -1322,6 +1329,8 @@ class CoverageMaxProbFormulationRelaxed(object):
                 'TotalSensorCost': pe.value(model.total_sensor_cost),
                 'EntityAssessment': entity_assessment,
                 'SensorAssessment': sensor_assessment,
+                'WallTime': walltime,
+                'SolTime': solvertime,
                 'Prob_list': model.prob,
                 'model.y': model.y,
                 'model.g': g_out,

@@ -171,7 +171,7 @@ class Grid(object):
         plt = plotly.offline.plot({
             "data": [trace0],
             "layout": layout,
-            },
+            },#image='png',image_filename=filename, #auto_open=False,
         filename=filename)
 
 
